@@ -9,4 +9,5 @@ proto_language(
     grpc_plugin_name = "grpc_python",
     pb_file_extensions = ["_pb2.py"],
     supports_grpc = True,
+    output_file_style = 'python',
 )

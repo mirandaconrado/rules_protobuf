@@ -191,7 +191,27 @@ def _build_output_files(run, builder):
         path = []
 
       path.append(base + ext)
-      pbfile = ctx.new_file("/".join(path))
+      path = "/".join(path)
+      if run.lang.output_file_style == 'python':
+        path = path.replace('-','_')
+        fixed_path = path
+        if "." in path[:-3]:
+          fixed_path = path[:-3].replace(".","/") + ".py"
+        pbfile = ctx.new_file(fixed_path)
+        compiler_pbfile = pbfile
+        # grpc outputs to the folder with dots, so we need to copy
+        if "grpc" in ext and path != fixed_path:
+          wrong_file = ctx.new_file(path)
+          ctx.actions.run_shell(
+              outputs=[pbfile],
+              inputs=[wrong_file],
+              command = ["cp", wrong_file.path, pbfile.path],
+          )
+          compiler_pbfile = wrong_file
+      else:
+        pbfile = ctx.new_file(path)
+        compiler_pbfile = pbfile
+      builder["compiler_outputs"] += [compiler_pbfile]
       builder["outputs"] += [pbfile]
 
 
@@ -428,13 +448,13 @@ def _compile(ctx, unit):
   imports = ["--proto_path=" + i for i in unit.imports]
   srcs = [_get_offset_path(execdir, p.path) for p in unit.data.protos]
   protoc_cmd = [protoc] + list(unit.args) + imports + srcs
-  manifest = [f.short_path for f in unit.outputs]
+  manifest = [f.short_path for f in unit.compiler_outputs]
 
   transitive_units = depset()
   for u in unit.data.transitive_units:
     transitive_units = transitive_units | u.inputs
   inputs = list(unit.inputs | transitive_units) + [unit.compiler]
-  outputs = list(unit.outputs)
+  compiler_outputs = list(unit.compiler_outputs)
 
   cmds = [cmd for cmd in unit.commands] + [" ".join(protoc_cmd)]
   if execdir != ".":
@@ -476,14 +496,14 @@ cd $(bazel info execution_root)%s && \
       print(" > cmd%s: %s" % (i, protoc_cmd[i]))
     for i in range(len(inputs)):
       print(" > input%s: %s" % (i, inputs[i]))
-    for i in range(len(outputs)):
-      print(" > output%s: %s" % (i, outputs[i]))
+    for i in range(len(compiler_outputs)):
+      print(" > output%s: %s" % (i, compiler_outputs[i]))
 
   ctx.action(
     mnemonic = "ProtoCompile",
     command = " && ".join(cmds),
     inputs = inputs,
-    outputs = outputs,
+    outputs = compiler_outputs,
   )
 
 
@@ -561,6 +581,7 @@ def _proto_compile_impl(ctx):
     "imports": ctx.attr.imports + ["."],
     "inputs": ctx.files.protos + ctx.files.inputs,
     "outputs": [],
+    "compiler_outputs": [],
     "commands": [], # optional miscellaneous pre-protoc commands
   }
 
@@ -621,6 +642,7 @@ def _proto_compile_impl(ctx):
     imports = depset(builder["imports"]),
     inputs = depset(builder["inputs"]),
     outputs = depset(builder["outputs"] + [ctx.outputs.descriptor_set]),
+    compiler_outputs = depset(builder["compiler_outputs"] + [ctx.outputs.descriptor_set]),
     commands = depset(builder["commands"]),
   )
 

@@ -192,27 +192,30 @@ def _build_output_files(run, builder):
 
       path.append(base + ext)
       path = "/".join(path)
-      if run.lang.output_file_style == 'python':
-        path = path.replace('-','_')
-        fixed_path = path
-        if "." in path[:-3]:
-          fixed_path = path[:-3].replace(".","/") + ".py"
-        pbfile = ctx.new_file(fixed_path)
-        compiler_pbfile = pbfile
-        # grpc outputs to the folder with dots, so we need to copy
-        if "grpc" in ext and path != fixed_path:
-          wrong_file = ctx.new_file(path)
-          ctx.actions.run_shell(
-              outputs=[pbfile],
-              inputs=[wrong_file],
-              command = ["cp", wrong_file.path, pbfile.path],
-          )
-          compiler_pbfile = wrong_file
+      desired_file_path = path
+      if run.data.execdir != '.':
+          actual_file_path = '/'.join([file.dirname[len(run.data.execdir)+1:], base + ext])
       else:
-        pbfile = ctx.new_file(path)
-        compiler_pbfile = pbfile
-      builder["compiler_outputs"] += [compiler_pbfile]
-      builder["outputs"] += [pbfile]
+          actual_file_path = desired_file_path
+      if run.lang.output_file_style == 'python':
+        actual_file_path = actual_file_path.replace('-','_')
+        desired_file_path = desired_file_path.replace('-','_')
+
+        if "." in actual_file_path[:-3] and "grpc" not in ext:
+          actual_file_path = actual_file_path[:-3].replace(".","/") + ".py"
+      if actual_file_path != desired_file_path:
+          actual_file = ctx.new_file(actual_file_path)
+          desired_file = ctx.new_file(desired_file_path)
+          ctx.actions.run_shell(
+              outputs=[desired_file],
+              inputs=[actual_file],
+              command = ["cp", actual_file.path, desired_file.path],
+          )
+      else:
+        actual_file = ctx.new_file(actual_file_path)
+        desired_file = actual_file
+      builder["compiler_outputs"] += [actual_file]
+      builder["outputs"] += [desired_file]
 
 
 def _build_output_libdir(run, builder):
@@ -363,6 +366,9 @@ def _build_protobuf_out(run, builder):
   else:
     outdir = builder.get(lang.name + "_outdir", run.outdir)
 
+  if run.data.execdir != '.':
+      outdir = '../../' + run.ctx.outputs.descriptor_set.dirname
+
   _build_plugin_out(name, outdir, options, builder)
 
 
@@ -377,6 +383,8 @@ def _build_grpc_out(run, builder):
     outdir = builder.get(lang.name + "_outdir", run.outdir)
 
   options = builder.get(lang.name + "_grpc_options", [])
+  if run.data.execdir != '.':
+      outdir = '../../' + run.ctx.outputs.descriptor_set.dirname
 
   _build_plugin_out(name, outdir, options, builder)
 
